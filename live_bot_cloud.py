@@ -30,24 +30,23 @@ CONFIG = {
     "min_profit_bps": 10,
     "gas_usd": 0.005,
     "slippage_bps": 10,
-    "scan_interval": 1.0,  # Slower polling to avoid rate limits
+    "scan_interval": 30.0,  # 30 seconds to avoid rate limits
     "tokens": {
         "SOL": "So11111111111111111111111111111111111111112",
         "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     }
 }
 
-async def get_price_from_helius(token_address: str):
-    """Get price from Helius RPC using the correct endpoint"""
+async def get_price_from_jupiter(input_mint: str, output_mint: str, amount: float = 1):
+    """Get price from Jupiter API"""
     try:
-        # Use the correct Helius endpoint for token accounts
-        url = f"https://mainnet.helius-rpc.com/?api-key=4fac0c5b-8a92-4399-a020-4aedd5e1a5aa"
-        # Use the Solana RPC method to get token account balance (simplified for demo)
-        # For real implementation, you'd need to query token accounts directly
-        # This is a workaround for now - we'll use DexScreener as fallback
-        return None  # We'll use DexScreener as fallback
+        url = f"{CONFIG['jupiter_api_url']}/quote?inputMint={input_mint}&outputMint={output_mint}&amount={amount}&slippageBps={CONFIG['slippage_bps']}"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return float(data.get("outAmount", 0))
     except Exception as e:
-        print(f"Error fetching price from Helius: {e}", flush=True)
+        print(f"Error fetching price from Jupiter: {e}", flush=True)
         return None
 
 async def get_price_from_dexscreener(token_address: str):
@@ -65,11 +64,24 @@ async def get_price_from_dexscreener(token_address: str):
         print(f"Error fetching price from DexScreener: {e}", flush=True)
         return None
 
+async def get_token_price(token_address: str):
+    """Get token price using Jupiter API as primary source"""
+    try:
+        # Use USDC as the output mint for price
+        usdc_price = await get_price_from_jupiter(token_address, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 1)
+        if usdc_price:
+            return usdc_price
+
+        # Fallback to DexScreener
+        return await get_price_from_dexscreener(token_address)
+    except Exception as e:
+        print(f"Error getting token price: {e}", flush=True)
+        return None
+
 async def detect_opportunity(token: str, token_address: str):
     """Detect arbitrage opportunity"""
     try:
-        # Try Helius first (but it won't work for token prices)
-        price = await get_price_from_dexscreener(token_address)  # Use DexScreener as fallback
+        price = await get_token_price(token_address)
         if price is None:
             return None
 
@@ -100,7 +112,7 @@ async def detect_opportunity(token: str, token_address: str):
 
 async def scan_loop():
     print("🚀 Live Arbitrage Bot Started", flush=True)
-    print(f"Connected to Helius RPC: {RPC_URL[:35]}...", flush=True)
+    print(f"Connected to Jupiter API: {CONFIG['jupiter_api_url']}", flush=True)
     while True:
         try:
             for token, address in CONFIG["tokens"].items():
@@ -110,22 +122,7 @@ async def scan_loop():
             await asyncio.sleep(CONFIG["scan_interval"])
         except Exception as e:
             print(f"Error: {e}", flush=True)
-            await asyncio.sleep(1)
-
-# Configuration
-CONFIG = {
-    "jupiter_api_url": "https://quote-api.jup.ag/v6",
-    "capital_usd": 1000.0,
-    "max_position_fraction": 0.1,
-    "min_profit_bps": 10,
-    "gas_usd": 0.005,
-    "slippage_bps": 10,
-    "scan_interval": 30.0,  # Slower polling to avoid rate limits
-    "tokens": {
-        "SOL": "So11111111111111111111111111111111111111112",
-        "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    }
-}
+            await asyncio.sleep(300)  # Wait 5 minutes before retrying
 
 if __name__ == "__main__":
     if not RPC_URL:
