@@ -41,6 +41,7 @@ def get_jupiter_quote(amount_sol: float = 1.0) -> Optional[float]:
             f"?inputMint={CONFIG['tokens']['SOL']}"
             f"&outputMint={CONFIG['tokens']['USDC']}"
             f"&amount={lamports}"
+            f"&slippageBps=100"  # Allow 1% slippage to get better fills
         )
         headers = {'User-Agent': 'Mozilla/5.0'}
         resp = requests.get(url, headers=headers, timeout=5)
@@ -49,8 +50,7 @@ def get_jupiter_quote(amount_sol: float = 1.0) -> Optional[float]:
             out_usdc = float(data['outAmount']) / 1_000_000  # USDC has 6 decimals
             return out_usdc / amount_sol
     except Exception:
-        pass
-    return None
+        return None
 
 
 def get_coingecko_price() -> Optional[float]:
