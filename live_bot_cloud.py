@@ -23,7 +23,7 @@ HELIUS_RPC_URL = os.getenv("HELIUS_RPC_URL")
 CONFIG = {
     "capital_usd": 1000.0,
     "scan_interval": 15.0,        # 15 seconds between scans to avoid API rate limits
-    "min_profit_usd": 0.50,       # Minimum profit after estimated gas/fees to trigger trade
+    "min_profit_usd": 0.01,       # Minimum profit after estimated gas/fees to trigger trade
     "trade_amount_sol": 1.0,      # Amount of SOL to trade in each opportunity check
     "tokens": {
         "SOL": "So11111111111111111111111111111111111111112",
