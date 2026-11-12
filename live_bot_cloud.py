@@ -179,17 +179,19 @@ async def scan_market():
                 price_str = " | ".join([f"{k}: ${v:.2f}" for k, v in valid.items()])
                 print(f"{price_str}", flush=True)
 
+                 # Check for profitable spread AND ensure we aren't trading on CoinGecko
                 if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
-                    print(f"EXECUTING REAL SWAP: Buy {buy_source} -> Sell {sell_source}", flush=True)
-
-                    success = execute_real_swap(CONFIG["trade_amount_sol"])
-
-                    if success:
-                        trades_executed += 1
-                        total_profit += net_profit_usd
-                        print(f"REAL TRADE #{trades_executed} | Profit: ${net_profit_usd:.4f} | Total: ${total_profit:.2f}", flush=True)
+                    if buy_source in ["Jupiter", "Raydium"] and sell_source in ["Jupiter", "Raydium"]:
+                        print(f"⚡ EXECUTING REAL SWAP: Buy {buy_source} -> Sell {sell_source}", flush=True)
+                        success = execute_real_swap(CONFIG["trade_amount_sol"])
+                        if success:
+                            trades_executed += 1
+                            total_profit += net_profit_usd
+                            print(f"✅ REAL TRADE #{trades_executed} | Profit: ${net_profit_usd:.4f} | Total: ${total_profit:.2f}", flush=True)
+                        else:
+                            print("❌ Swap failed", flush=True)
                     else:
-                        print("Swap failed", flush=True)
+                        print(f"🔍 Skipping: Cannot trade on {buy_source} or {sell_source} (Not an exchange)", flush=True)
                 else:
                     print(f"No trade. Spread: ${raw_spread_total:.4f} (Net: ${net_profit_usd:.4f})", flush=True)
 
