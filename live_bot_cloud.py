@@ -48,27 +48,32 @@ def get_raydium_price():
     return None
 
 def execute_jupiter_swap(amount_sol):
-    """Execute swap via Jupiter Aggregator."""
+    """Execute swap via Jupiter using a different API domain that isn't blocked."""
     try:
         lamports = int(amount_sol * 1_000_000_000)
+        # Use api.jup.ag instead of quote-api.jup.ag
+        base_url = "https://api.jup.ag/swap/v6"
+
         # 1. Get Quote
-        quote = requests.get("https://quote-api.jup.ag/v6/quote", params={
+        quote = requests.get("https://api.jup.ag/swap/v6/quote", params={
             "inputMint": CONFIG["tokens"]["SOL"], "outputMint": CONFIG["tokens"]["USDC"],
             "amount": lamports, "slippageBps": CONFIG["max_slippage_bps"]
         }, timeout=5).json()
 
         # 2. Get Transaction
-        tx_resp = requests.post("https://quote-api.jup.ag/v6/swap/transaction", json={
+        tx_resp = requests.post("https://api.jup.ag/swap/v6/swap", json={
             "quoteResponse": quote, "userPublicKey": WALLET_ADDRESS,
             "wrapUnwrapSol": True, "prioritizationFeeLamports": 10000
         }, timeout=10)
 
-        tx_encoded = tx_resp.json().get("transaction")
-        # 3. Send Transaction
+        tx_encoded = tx_resp.json().get("swapTransaction")
+
+        # 3. Send Transaction via Helius RPC
         res = requests.post(HELIUS_RPC_URL, json={
             "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
             "params": [tx_encoded, {"encoding": "base64"}]
         }, timeout=15)
+
         return res.status_code == 200
     except Exception as e:
         print(f"Swap Error: {e}", flush=True)
