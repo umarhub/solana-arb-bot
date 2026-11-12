@@ -204,8 +204,8 @@ async def scan_market():
                 price_str = " | ".join([f"{k}: ${v:.2f}" for k, v in valid.items()])
                 print(f"{price_str}", flush=True)
 
-                 # Check for profitable spread AND ensure we aren't trading on CoinGecko
-                 if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
+                  # Check for profitable spread AND ensure we only trade on actual DEXs
+                if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
                     if buy_source in ["DexScreener", "Raydium"] and sell_source in ["DexScreener", "Raydium"]:
                         print(f"⚡ EXECUTING REAL SWAP: Buy {buy_source} -> Sell {sell_source}", flush=True)
                         success = execute_real_swap(CONFIG["trade_amount_sol"])
