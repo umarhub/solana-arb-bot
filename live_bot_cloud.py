@@ -137,14 +137,39 @@ def execute_real_swap(amount_sol):
             continue
     return False
 
+def get_dexscreener_price():
+    try:
+        url = "https://api.dexscreener.com/latest/dex/tokens/" + CONFIG["tokens"]["SOL"]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            pairs = resp.json().get("pairs", [])
+            sol_pairs = [p for p in pairs if p.get("baseToken", {}).get("symbol") == "SOL"]
+            if sol_pairs:
+                return float(sol_pairs[0]["priceUsd"])
+    except Exception:
+        pass
+    return None
+
+def get_dexscreener_price():
+    try:
+        url = "https://api.dexscreener.com/latest/dex/tokens/" + CONFIG["tokens"]["SOL"]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            pairs = resp.json().get("pairs", [])
+            sol_pairs = [p for p in pairs if p.get("baseToken", {}).get("symbol") == "SOL"]
+            if sol_pairs: return float(sol_pairs[0]["priceUsd"])
+    except Exception: pass
+    return None
+
 async def fetch_all_prices():
     loop = asyncio.get_event_loop()
-    jup_task = loop.run_in_executor(None, get_jupiter_quote, CONFIG["trade_amount_sol"])
+    dex_task = loop.run_in_executor(None, get_dexscreener_price)
     ray_task = loop.run_in_executor(None, get_raydium_price)
     cg_task = loop.run_in_executor(None, get_coingecko_price)
-    jup, ray, cg = await asyncio.gather(jup_task, ray_task, cg_task)
-    return {"Jupiter": jup, "Raydium": ray, "CoinGecko": cg}
-
+    dex, ray, cg = await asyncio.gather(dex_task, ray_task, cg_task)
+    return {"DexScreener": dex, "Raydium": ray, "CoinGecko": cg}
 
 async def scan_market():
     print("REAL MONEY ARBITRAGE BOT STARTED", flush=True)
@@ -180,8 +205,8 @@ async def scan_market():
                 print(f"{price_str}", flush=True)
 
                  # Check for profitable spread AND ensure we aren't trading on CoinGecko
-                if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
-                    if buy_source in ["Jupiter", "Raydium"] and sell_source in ["Jupiter", "Raydium"]:
+                 if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
+                    if buy_source in ["DexScreener", "Raydium"] and sell_source in ["DexScreener", "Raydium"]:
                         print(f"⚡ EXECUTING REAL SWAP: Buy {buy_source} -> Sell {sell_source}", flush=True)
                         success = execute_real_swap(CONFIG["trade_amount_sol"])
                         if success:
