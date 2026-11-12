@@ -20,7 +20,7 @@ sys.stdout.reconfigure(line_buffering=True)
 load_dotenv()
 
 HELIUS_RPC_URL = os.getenv("HELIUS_RPC_URL")
-BOT_WALLET_PRIVATE_KEY = os.getenv("BOT_WALLET_PRI
+BOT_WALLET_PRIVATE_KEY = os.getenv("BOT_WALLET_PRIVATE_KEY")
 
 CONFIG = {
     "capital_usd": 1000.0,
