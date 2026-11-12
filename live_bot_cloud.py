@@ -34,24 +34,31 @@ CONFIG = {
 WALLET_ADDRESS = "FGtCJy49HUXukc5ee6tmjyt74ojzjJvGGbvgTEExJ6QW"
 
 
+JUPITER_BASES = [
+    "https://api.jup.ag/v6",
+    "https://quote-api.jup.ag/v6",
+    "https://jup.ag/v6",
+]
+
 def get_jupiter_quote(amount_sol=1.0):
-    try:
-        lamports = int(amount_sol * 1000000000)
-        url = "https://quote-api.jup.ag/v6/quote"
-        params = {
-            "inputMint": CONFIG["tokens"]["SOL"],
-            "outputMint": CONFIG["tokens"]["USDC"],
-            "amount": lamports,
-            "slippageBps": CONFIG["max_slippage_bps"]
-        }
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            out_usdc = float(data["outAmount"]) / 1000000
-            return out_usdc / amount_sol
-    except Exception:
-        pass
+    lamports = int(amount_sol * 1000000000)
+    for base in JUPITER_BASES:
+        try:
+            url = f"{base}/quote"
+            params = {
+                "inputMint": CONFIG["tokens"]["SOL"],
+                "outputMint": CONFIG["tokens"]["USDC"],
+                "amount": lamports,
+                "slippageBps": CONFIG["max_slippage_bps"]
+            }
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(url, params=params, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                out_usdc = float(data["outAmount"]) / 1000000
+                return out_usdc / amount_sol
+        except Exception:
+            continue
     return None
 
 
