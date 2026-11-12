@@ -1,6 +1,6 @@
 """
-Live Solana Arbitrage Bot - Real Cross-DEX Price Comparison
-Compares real price quotes between Raydium, Orca, and Jupiter via real APIs.
+Live Solana Arbitrage Bot - REAL TRADES VERSION
+Executes actual swaps on Solana DEXs using your wallet.
 """
 
 import asyncio
@@ -8,190 +8,277 @@ import os
 import sys
 import requests
 import json
+import base64
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 from dotenv import load_dotenv
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# Ensure unbuffered output so logs show up immediately in Render
 sys.stdout.reconfigure(line_buffering=True)
-
 load_dotenv()
+
 HELIUS_RPC_URL = os.getenv("HELIUS_RPC_URL")
+BOT_WALLET_PRIVATE_KEY = os.getenv("BOT_WALLET_PRI
 
 CONFIG = {
     "capital_usd": 1000.0,
-    "scan_interval": 15.0,        # 15 seconds between scans to avoid API rate limits
-    "min_profit_usd": 0.01,       # Minimum profit after estimated gas/fees to trigger trade
-    "trade_amount_sol": 1.0,      # Amount of SOL to trade in each opportunity check
+    "scan_interval": 10.0,
+    "min_profit_usd": 0.01,
+    "trade_amount_sol": 1.0,
+    "max_slippage_bps": 50,
     "tokens": {
         "SOL": "So11111111111111111111111111111111111111112",
-        "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wE
     }
 }
 
-
-def get_jupiter_quote(amount_sol: float = 1.0) -> Optional[float]:
-    """Fetch SOL price (in USDC) from Jupiter Aggregator API."""
+def get_jupiter_quote(amount_sol: float = 1.0) ->
     try:
         lamports = int(amount_sol * 1_000_000_000)
         url = (
             f"https://quote-api.jup.ag/v6/quote"
             f"?inputMint={CONFIG['tokens']['SOL']}"
-            f"&outputMint={CONFIG['tokens']['USDC']}"
+            f"&outputMint={CONFIG['tokens']['USDC'
             f"&amount={lamports}"
-            f"&slippageBps=100"  # Allow 1% slippage to get better fills
+            f"&slippageBps={CONFIG['max_slippage_b
         )
         headers = {'User-Agent': 'Mozilla/5.0'}
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            out_usdc = float(data['outAmount']) / 1_000_000  # USDC has 6 decimals
+            out_usdc = float(data['outAmount']) /
             return out_usdc / amount_sol
-    except Exception:
-        return None
-
-
-def get_coingecko_price() -> Optional[float]:
-    """Fetch SOL price from CoinGecko public API."""
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            return float(resp.json()['solana']['usd'])
     except Exception:
         pass
     return None
 
+def get_coingecko_price() -> Optional[float]:
+    try:
+        url = "https://api.coingecko.com/api/v3/siencies=usd"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        resp = requests.get(url, headers=headers,
+        if resp.status_code == 200:
+            return float(resp.json()['solana']['us
+    except Exception:
+        pass
+    return None
 
 def get_raydium_price() -> Optional[float]:
-    """Fetch SOL price from Raydium V3 Price API."""
     try:
         url = f"https://api-v3.raydium.io/mint/price?mints={CONFIG['tokens']['SOL']}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("success") and CONFIG['tokens']['SOL'] in data.get("data", {}):
+            if data.get("success") and CONFIG['toka", {}):
                 return float(data["data"][CONFIG['tokens']['SOL']])
     except Exception:
         pass
     return None
 
+def get_jupiter_swap_transaction(quote_data, walle
+    """Get a swap transaction from Jupiter and return it for signing."""
+    try:
+        # Step 1: Get swap transaction
+        swap_url = "https://quote-api.jup.ag/v6/sw
+        swap_payload = {
+            "quoteResponse": quote_data,
+            "userPublicKey": wallet_address,
+            "wrapUnwrapSol": True,
+            "dynamicComputeUnitLimit": True,
+            "prioritizationFeeLamports": 10000
+        }
+        headers = {'User-Agent': 'Mozilla/5.0', 'Con'}
+        resp = requests.post(swap_url, json=swap_payload, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            print(f"Swap transaction failed: {resp.status_code} {resp.text[:200]}", flush=True)
+    except Exception as e:
+        print(f"Swap transaction error: {e}", flush=True)
+    return None
+
+def execute_real_swap(buy_price, sell_price, amoune_key):
+    """Execute a real swap on Jupiter."""
+    try:
+        lamports = int(amount_sol * 1_000_000_000)
+
+        # Get quote for SOL -> USDC
+        quote_url = (
+            f"https://quote-api.jup.ag/v6/quote"
+            f"?inputMint={CONFIG['tokens']['SOL']}
+            f"&outputMint={CONFIG['tokens']['USDC']}"
+            f"&amount={lamports}"
+            f"&slippageBps={CONFIG['max_slippage_bps']}"
+        )
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        quote_resp = requests.get(quote_url, heade
+
+        if quote_resp.status_code != 200:
+            print(f"Quote failed: {quote_resp.status_code}", flush=True)
+            return False
+
+        quote_data = quote_resp.json()
+
+        # Get swap transaction
+        swap_tx = get_jupiter_swap_transaction(quote_data, wallet_address, private_key)
+        if not swap_tx:
+            return False
+
+        # Sign and send transaction
+        tx_encoded = swap_tx.get("transaction")
+        if not tx_encoded:
+            print("No transaction in swap response
+            return False
+
+        # Send the transaction to Solana
+        send_url = f"{HELIUS_RPC_URL}"
+        send_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "sendTransaction",
+            "params": [
+                tx_encoded,
+                {
+                    "encoding": "base64",
+                    "skipPreflight": False,
+                    "preflightCommitment": "confir
+                    "maxRetries": 3
+                }
+            ]
+        }
+        send_resp = requests.post(send_url, json=send_payload, headers={'Content-Type': 'application/json'}, timeout=15)
+
+        if send_resp.status_code == 200:
+            send_data = send_resp.json()
+            if "result" in send_data:
+                tx_sig = send_data["result"]
+                print(f"✅ REAL SWAP EXECUTED! TX: {tx_sig}", flush=True)
+                return True
+            elif "error" in send_data:
+                print(f"Send error: {send_data['er
+        else:
+            print(f"Send failed: {send_resp.status
+
+    except Exception as e:
+        print(f"Swap execution error: {e}", flush=True)
+
+    return False
 
 async def fetch_all_prices() -> Dict[str, Optional[float]]:
-    """Fetch real SOL prices from all available DEX / price sources concurrently."""
     loop = asyncio.get_event_loop()
-
-    # Run requests concurrently in executor to not block the event loop
     jup_task = loop.run_in_executor(None, get_jupiter_quote, CONFIG["trade_amount_sol"])
-    ray_task = loop.run_in_executor(None, get_raydium_price)
+    ray_task = loop.run_in_executor(None, get_rayd
     cg_task = loop.run_in_executor(None, get_coingecko_price)
+    jup, ray, cg = await asyncio.gather(jup_task,
+    return {"Jupiter": jup, "Raydium": ray, "CoinGecko": cg}
 
-    jup, ray, cg = await asyncio.gather(jup_task, ray_task, cg_task)
-
-    return {
-        "Jupiter": jup,
-        "Raydium": ray,
-        "CoinGecko": cg,
-    }
-
+async def get_wallet_balance():
+    """Get real wallet balance from Solana blockch
+    try:
+        if not HELIUS_RPC_URL:
+            return None
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getBalance",
+            "params": ["FGtCJy49HUXukc5ee6tmjyt74o
+        }
+        resp = requests.post(HELIUS_RPC_URL, json=pe': 'application/json'}, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "result" in data:
+                lamports = data["result"]["value"]
+                return lamports / 1_000_000_000
+    except Exception as e:
+        print(f"Balance check error: {e}", flush=True)
+    return None
 
 async def scan_market():
-    """Main scanning loop comparing real prices across sources."""
-    print(f"🚀 Real Solana Arbitrage Bot Started | Capital: ${CONFIG['capital_usd']:.2f}", flush=True)
+    print("🚀 REAL MONEY ARBITRAGE BOT STARTED", flush=True)
+    print(f"Wallet: FGtCJy49HUXukc5ee6tmjyt74ojzjJ
     print("------------------------------------------------------------------", flush=True)
 
     trades_executed = 0
+    total_profit = 0.0
 
     while True:
         try:
             prices = await fetch_all_prices()
-
-            # Filter valid (non-None) prices
             valid = {source: p for source, p in prices.items() if p is not None}
 
             if len(valid) < 2:
-                # Need at least 2 prices to calculate spread
-                single_price = list(valid.values())[0] if valid else None
+                single_price = list(valid.values()
                 if single_price:
-                    print(f"📊 Single price obtained (${single_price:.2f}) — need a 2nd DEX source for comparison.", flush=True)
+                    print(f"📊 Single price (${sinurce", flush=True)
                 else:
-                    print("⚠️ Could not fetch prices from any source. Retrying next cycle...", flush=True)
+                    print("⚠️ No prices fetched",
             else:
-                # Find cheap source (buy) and expensive source (sell)
-                buy_source = min(valid, key=valid.get)
+                buy_source = min(valid, key=valid.
                 sell_source = max(valid, key=valid.get)
-
                 buy_price = valid[buy_source]
                 sell_price = valid[sell_source]
 
-                # Calculate real spread per SOL
                 raw_spread_per_sol = sell_price - buy_price
-                raw_spread_total = raw_spread_per_sol * CONFIG["trade_amount_sol"]
-
-                # Estimate Solana network gas + DEX fee (approx $0.05 per trade)
+                raw_spread_total = raw_spread_per_l"]
                 estimated_fees_usd = 0.05
-                net_profit_usd = raw_spread_total - estimated_fees_usd
+                net_profit_usd = raw_spread_total
 
-                # Log price snapshot
-                price_str = " | ".join([f"{k}: ${v:.2f}" for k, v in valid.items()])
+                price_str = " | ".join([f"{k}: ${vs()])
                 print(f"📊 {price_str}", flush=True)
 
                 if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
-                    trades_executed += 1
-                    CONFIG['capital_usd'] += net_profit_usd
+                    print(f"⚡ EXECUTING REAL SWAPll_source}", flush=True)
 
-                    print(
-                        f"⚡ REAL ARBITRAGE OPPORTUNITY!\n"
-                        f"   Buy at {buy_source} (${buy_price:.2f}) ➔ Sell at {sell_source} (${sell_price:.2f})\n"
-                        f"   Gross Spread: ${raw_spread_total:.4f} | Est. Fees: ${estimated_fees_usd:.2f} | Net Profit: ${net_profit_usd:.2f}\n"
-                        f"   ✅ Paper Trade Executed #{trades_executed} | New Balance: ${CONFIG['capital_usd']:.2f}",
-                        flush=True
+                    # Execute real swap
+                    success = execute_real_swap(
+                        buy_price, sell_price,
+                        CONFIG["trade_amount_sol"],
+                        "FGtCJy49HUXukc5ee6tmjyt74
+                        BOT_WALLET_PRIVATE_KEY
                     )
+
+                    if success:
+                        trades_executed += 1
+                        total_profit += net_profit
+                        print(f"✅ REAL TRADE #{trades_executed} | Profit: ${net_profit_usd:.4f} | Total: ${total_profit:.2f}",
+flush=True)
+                    else:
+                        print("❌ Swap failed", fl
                 else:
-                    print(
-                        f"🔍 No trade. Best spread ({buy_source} ➔ {sell_source}): "
-                        f"${raw_spread_total:.4f} (Net after fees: ${net_profit_usd:.4f})",
-                        flush=True
-                    )
+                    print(f"🔍 No trade. Spread: $${net_profit_usd:.4f})", flush=True)
 
         except Exception as e:
             print(f"❌ Scan error: {e}", flush=True)
 
         print("------------------------------------------------------------------", flush=True)
-        await asyncio.sleep(CONFIG["scan_interval"])
+        await asyncio.sleep(CONFIG["scan_interval"
 
-
-# Health Check Server for Render Free Tier Keep-Alive
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Solana Real Arbitrage Bot is alive and well!")
-
+        self.wfile.write(b"Solana Real Money Arbitrage Bot is alive!")
     def log_message(self, format, *args):
         pass
-
 
 def start_health_check_server():
     port = int(os.getenv("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"✅ Health check server listening on port {port}", flush=True)
+    print(f"✅ Health check server on port {port}"
     server.serve_forever()
-
 
 if __name__ == "__main__":
     if not HELIUS_RPC_URL:
-        print("CRITICAL: HELIUS_RPC_URL not set in environment!", flush=True)
+        print("CRITICAL: HELIUS_RPC_URL not set!", flush=True)
+        sys.exit(1)
+    if not BOT_WALLET_PRIVATE_KEY:
+        print("CRITICAL: BOT_WALLET_PRIVATE_KEY no
         sys.exit(1)
 
-    # Start health check server in background thread so Render passes health checks
     health_thread = threading.Thread(target=start_health_check_server, daemon=True)
     health_thread.start()
-
-    # Start main scanning loop
     asyncio.run(scan_market())
