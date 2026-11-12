@@ -91,83 +91,51 @@ def get_raydium_price():
 
 
 def execute_real_swap(amount_sol):
-    """Execute a real swap on Jupiter."""
-    try:
-        lamports = int(amount_sol * 1000000000)
+    """Execute a real swap on Jupiter using robust endpoints."""
+    lamports = int(amount_sol * 1000000000)
 
-        # Get quote
-        quote_url = "https://quote-api.jup.ag/v6/quote"
-        quote_params = {
-            "inputMint": CONFIG["tokens"]["SOL"],
-            "outputMint": CONFIG["tokens"]["USDC"],
-            "amount": lamports,
-            "slippageBps": CONFIG["max_slippage_bps"]
-        }
-        headers = {"User-Agent": "Mozilla/5.0"}
-        quote_resp = requests.get(quote_url, params=quote_params, headers=headers, timeout=5)
+    # Try endpoints until one works
+    for base in JUPITER_BASES:
+        try:
+            # 1. Get Quote
+            quote_resp = requests.get(f"{base}/quote", params={
+                "inputMint": CONFIG["tokens"]["SOL"],
+                "outputMint": CONFIG["tokens"]["USDC"],
+                "amount": lamports,
+                "slippageBps": CONFIG["max_slippage_bps"]
+            }, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
 
-        if quote_resp.status_code != 200:
-            print(f"Quote failed: {quote_resp.status_code}", flush=True)
-            return False
+            if quote_resp.status_code != 200: continue
+            quote_data = quote_resp.json()
 
-        quote_data = quote_resp.json()
+            # 2. Get Transaction
+            swap_resp = requests.post(f"{base}/swap/transaction", json={
+                "quoteResponse": quote_data,
+                "userPublicKey": WALLET_ADDRESS,
+                "wrapUnwrapSol": True,
+                "dynamicComputeUnitLimit": True,
+                "prioritizationFeeLamports": 10000
+            }, headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}, timeout=10)
 
-        # Get swap transaction
-        swap_url = "https://quote-api.jup.ag/v6/swap/transaction"
-        swap_payload = {
-            "quoteResponse": quote_data,
-            "userPublicKey": WALLET_ADDRESS,
-            "wrapUnwrapSol": True,
-            "dynamicComputeUnitLimit": True,
-            "prioritizationFeeLamports": 10000
-        }
-        swap_headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
-        swap_resp = requests.post(swap_url, json=swap_payload, headers=swap_headers, timeout=10)
+            if swap_resp.status_code != 200: continue
 
-        if swap_resp.status_code != 200:
-            print(f"Swap tx failed: {swap_resp.status_code}", flush=True)
-            return False
+            tx_encoded = swap_resp.json().get("transaction")
+            if not tx_encoded: continue
 
-        swap_data = swap_resp.json()
-        tx_encoded = swap_data.get("transaction")
+            # 3. Send Transaction
+            send_payload = {
+                "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+                "params": [tx_encoded, {"encoding": "base64", "skipPreflight": False, "preflightCommitment": "confirmed", "maxRetries": 3}]
+            }
+            send_resp = requests.post(HELIUS_RPC_URL, json=send_payload, headers={"Content-Type": "application/json"}, timeout=15)
 
-        if not tx_encoded:
-            print("No transaction in swap response", flush=True)
-            return False
-
-        # Send transaction to Solana
-        send_payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "sendTransaction",
-            "params": [
-                tx_encoded,
-                {
-                    "encoding": "base64",
-                    "skipPreflight": False,
-                    "preflightCommitment": "confirmed",
-                    "maxRetries": 3
-                }
-            ]
-        }
-        send_resp = requests.post(HELIUS_RPC_URL, json=send_payload, headers={"Content-Type": "application/json"}, timeout=15)
-
-        if send_resp.status_code == 200:
-            send_data = send_resp.json()
-            if "result" in send_data:
-                tx_sig = send_data["result"]
-                print(f"REAL SWAP EXECUTED! TX: {tx_sig}", flush=True)
+            if send_resp.status_code == 200 and "result" in send_resp.json():
+                print(f"✅ REAL SWAP EXECUTED! TX: {send_resp.json()['result']}", flush=True)
                 return True
-            elif "error" in send_data:
-                print(f"Send error: {send_data['error']}", flush=True)
-        else:
-            print(f"Send failed: {send_resp.status_code}", flush=True)
 
-    except Exception as e:
-        print(f"Swap execution error: {e}", flush=True)
-
+        except Exception:
+            continue
     return False
-
 
 async def fetch_all_prices():
     loop = asyncio.get_event_loop()
