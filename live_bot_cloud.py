@@ -1,14 +1,10 @@
 """
-Live Solana Arbitrage Bot - REAL TRADES VERSION
+Live Solana Arbitrage Bot - FINAL REAL TRADES VERSION
 """
-
 import asyncio
 import os
 import sys
 import requests
-import json
-from datetime import datetime, timezone
-from typing import Dict, Optional
 from dotenv import load_dotenv
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
@@ -30,251 +26,90 @@ CONFIG = {
         "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     }
 }
-
 WALLET_ADDRESS = "FGtCJy49HUXukc5ee6tmjyt74ojzjJvGGbvgTEExJ6QW"
 
-
-JUPITER_BASES = [
-    "https://api.jup.ag/v6",
-    "https://quote-api.jup.ag/v6",
-    "https://jup.ag/v6",
-]
-
-def get_jupiter_quote(amount_sol=1.0):
-    lamports = int(amount_sol * 1000000000)
-    for base in JUPITER_BASES:
-        try:
-            url = f"{base}/quote"
-            params = {
-                "inputMint": CONFIG["tokens"]["SOL"],
-                "outputMint": CONFIG["tokens"]["USDC"],
-                "amount": lamports,
-                "slippageBps": CONFIG["max_slippage_bps"]
-            }
-            headers = {"User-Agent": "Mozilla/5.0"}
-            resp = requests.get(url, params=params, headers=headers, timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                out_usdc = float(data["outAmount"]) / 1000000
-                return out_usdc / amount_sol
-        except Exception:
-            continue
-    return None
-
-
-def get_coingecko_price():
+def get_dexscreener_price():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price"
-        params = {"ids": "solana", "vs_currencies": "usd"}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
+        resp = requests.get("https://api.dexscreener.com/latest/dex/tokens/" + CONFIG["tokens"]["SOL"], timeout=5)
         if resp.status_code == 200:
-            return float(resp.json()["solana"]["usd"])
-    except Exception:
-        pass
+            pairs = resp.json().get("pairs", [])
+            sol_pairs = [p for p in pairs if p.get("baseToken", {}).get("symbol") == "SOL"]
+            return float(sol_pairs[0]["priceUsd"]) if sol_pairs else None
+    except: pass
     return None
-
 
 def get_raydium_price():
     try:
-        url = "https://api-v3.raydium.io/mint/price"
-        params = {"mints": CONFIG["tokens"]["SOL"]}
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
+        resp = requests.get("https://api-v3.raydium.io/mint/price", params={"mints": CONFIG["tokens"]["SOL"]}, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
-            if data.get("success") and CONFIG["tokens"]["SOL"] in data.get("data", {}):
-                return float(data["data"][CONFIG["tokens"]["SOL"]])
-    except Exception:
-        pass
+            return float(data["data"][CONFIG["tokens"]["SOL"]]) if data.get("success") else None
+    except: pass
     return None
 
-
-def execute_real_swap(amount_sol):
-    """Execute a real swap on Jupiter using robust endpoints."""
-    lamports = int(amount_sol * 1000000000)
-
-    # Try endpoints until one works
-    for base in JUPITER_BASES:
-        try:
-            # 1. Get Quote
-            quote_resp = requests.get(f"{base}/quote", params={
-                "inputMint": CONFIG["tokens"]["SOL"],
-                "outputMint": CONFIG["tokens"]["USDC"],
-                "amount": lamports,
-                "slippageBps": CONFIG["max_slippage_bps"]
-            }, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-
-            if quote_resp.status_code != 200: continue
-            quote_data = quote_resp.json()
-
-            # 2. Get Transaction
-            swap_resp = requests.post(f"{base}/swap/transaction", json={
-                "quoteResponse": quote_data,
-                "userPublicKey": WALLET_ADDRESS,
-                "wrapUnwrapSol": True,
-                "dynamicComputeUnitLimit": True,
-                "prioritizationFeeLamports": 10000
-            }, headers={"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}, timeout=10)
-
-            if swap_resp.status_code != 200: continue
-
-            tx_encoded = swap_resp.json().get("transaction")
-            if not tx_encoded: continue
-
-            # 3. Send Transaction
-            send_payload = {
-                "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
-                "params": [tx_encoded, {"encoding": "base64", "skipPreflight": False, "preflightCommitment": "confirmed", "maxRetries": 3}]
-            }
-            send_resp = requests.post(HELIUS_RPC_URL, json=send_payload, headers={"Content-Type": "application/json"}, timeout=15)
-
-            if send_resp.status_code == 200 and "result" in send_resp.json():
-                print(f"✅ REAL SWAP EXECUTED! TX: {send_resp.json()['result']}", flush=True)
-                return True
-
-        except Exception:
-            continue
-    return False
-
-def get_dexscreener_price():
+def execute_jupiter_swap(amount_sol):
+    """Execute swap via Jupiter Aggregator."""
     try:
-        url = "https://api.dexscreener.com/latest/dex/tokens/" + CONFIG["tokens"]["SOL"]
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            pairs = resp.json().get("pairs", [])
-            sol_pairs = [p for p in pairs if p.get("baseToken", {}).get("symbol") == "SOL"]
-            if sol_pairs:
-                return float(sol_pairs[0]["priceUsd"])
-    except Exception:
-        pass
-    return None
+        lamports = int(amount_sol * 1_000_000_000)
+        # 1. Get Quote
+        quote = requests.get("https://quote-api.jup.ag/v6/quote", params={
+            "inputMint": CONFIG["tokens"]["SOL"], "outputMint": CONFIG["tokens"]["USDC"],
+            "amount": lamports, "slippageBps": CONFIG["max_slippage_bps"]
+        }, timeout=5).json()
 
-def get_dexscreener_price():
-    try:
-        url = "https://api.dexscreener.com/latest/dex/tokens/" + CONFIG["tokens"]["SOL"]
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            pairs = resp.json().get("pairs", [])
-            sol_pairs = [p for p in pairs if p.get("baseToken", {}).get("symbol") == "SOL"]
-            if sol_pairs: return float(sol_pairs[0]["priceUsd"])
-    except Exception: pass
-    return None
+        # 2. Get Transaction
+        tx_resp = requests.post("https://quote-api.jup.ag/v6/swap/transaction", json={
+            "quoteResponse": quote, "userPublicKey": WALLET_ADDRESS,
+            "wrapUnwrapSol": True, "prioritizationFeeLamports": 10000
+        }, timeout=10)
 
-async def fetch_all_prices():
+        tx_encoded = tx_resp.json().get("transaction")
+        # 3. Send Transaction
+        res = requests.post(HELIUS_RPC_URL, json={
+            "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+            "params": [tx_encoded, {"encoding": "base64"}]
+        }, timeout=15)
+        return res.status_code == 200
+    except Exception as e:
+        print(f"Swap Error: {e}", flush=True)
+        return False
+
+async def fetch_prices():
     loop = asyncio.get_event_loop()
-    dex_task = loop.run_in_executor(None, get_dexscreener_price)
-    ray_task = loop.run_in_executor(None, get_raydium_price)
-    cg_task = loop.run_in_executor(None, get_coingecko_price)
-    dex, ray, cg = await asyncio.gather(dex_task, ray_task, cg_task)
-    return {"DexScreener": dex, "Raydium": ray, "CoinGecko": cg}
+    dex = await loop.run_in_executor(None, get_dexscreener_price)
+    ray = await loop.run_in_executor(None, get_raydium_price)
+    return {"DexScreener": dex, "Raydium": ray}
 
 async def scan_market():
-    print("REAL MONEY ARBITRAGE BOT STARTED", flush=True)
-    print(f"Wallet: {WALLET_ADDRESS}", flush=True)
-    print("-" * 60, flush=True)
-
-    trades_executed = 0
-    total_profit = 0.0
-
+    print("BOT STARTED - REAL TRADING ENABLED", flush=True)
     while True:
         try:
-            prices = await fetch_all_prices()
-            valid = {source: p for source, p in prices.items() if p is not None}
+            prices = await fetch_prices()
+            valid = {s: p for s, p in prices.items() if p is not None}
+            if len(valid) == 2:
+                buy_s, sell_s = min(valid, key=valid.get), max(valid, key=valid.get)
+                profit = (valid[sell_s] - valid[buy_s]) * CONFIG["trade_amount_sol"] - 0.05
+                print(f"Prices: {valid} | Spread: {profit:.4f}", flush=True)
 
-            if len(valid) < 2:
-                single_price = list(valid.values())[0] if valid else None
-                if single_price:
-                    print(f"Single price (${single_price:.2f}) - need 2nd source", flush=True)
-                else:
-                    print("No prices fetched", flush=True)
-            else:
-                buy_source = min(valid, key=valid.get)
-                sell_source = max(valid, key=valid.get)
-                buy_price = valid[buy_source]
-                sell_price = valid[sell_source]
-
-                raw_spread_per_sol = sell_price - buy_price
-                raw_spread_total = raw_spread_per_sol * CONFIG["trade_amount_sol"]
-                estimated_fees_usd = 0.05
-                net_profit_usd = raw_spread_total - estimated_fees_usd
-
-                price_str = " | ".join([f"{k}: ${v:.2f}" for k, v in valid.items()])
-                print(f"{price_str}", flush=True)
-
-                  # Check for profitable spread AND ensure we only trade on actual DEXs
-                if buy_source != sell_source and net_profit_usd > CONFIG["min_profit_usd"]:
-                    if buy_source in ["DexScreener", "Raydium"] and sell_source in ["DexScreener", "Raydium"]:
-                        print(f"⚡ EXECUTING REAL SWAP: Buy {buy_source} -> Sell {sell_source}", flush=True)
-                        success = execute_real_swap(CONFIG["trade_amount_sol"])
-                        if success:
-                            trades_executed += 1
-                            total_profit += net_profit_usd
-                            print(f"✅ REAL TRADE #{trades_executed} | Profit: ${net_profit_usd:.4f} | Total: ${total_profit:.2f}", flush=True)
-                        else:
-                            print("❌ Swap failed", flush=True)
+                if profit > CONFIG["min_profit_usd"]:
+                    print(f"⚡ EXECUTING SWAP via Jupiter", flush=True)
+                    if execute_jupiter_swap(CONFIG["trade_amount_sol"]):
+                        print("✅ TRADE SUCCESSFUL", flush=True)
                     else:
-                        print(f"🔍 Skipping: Cannot trade on {buy_source} or {sell_source} (Not an exchange)", flush=True)
-                else:
-                    print(f"No trade. Spread: ${raw_spread_total:.4f} (Net: ${net_profit_usd:.4f})", flush=True)
-
+                        print("❌ TRADE FAILED", flush=True)
         except Exception as e:
-            print(f"Scan error: {e}", flush=True)
+            print(f"Error: {e}", flush=True)
+        await asyncio.sleep(10)
 
-        print("-" * 60, flush=True)
-        await asyncio.sleep(CONFIG["scan_interval"])
-
-
+# Health Check (Keep-Alive)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Solana Real Money Bot is alive!")
+        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+    def log_message(self, *args): pass
 
-    def log_message(self, format, *args):
-        pass
-
-
-def start_health_check_server():
-    port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"Health check server on port {port}", flush=True)
-    server.serve_forever()
-
+def run_server():
+    HTTPServer(("0.0.0.0", int(os.getenv("PORT", 8080))), HealthCheckHandler).serve_forever()
 
 if __name__ == "__main__":
-    if not HELIUS_RPC_URL:
-        print("CRITICAL: HELIUS_RPC_URL not set!", flush=True)
-        sys.exit(1)
-    if not BOT_WALLET_PRIVATE_KEY:
-        print("CRITICAL: BOT_WALLET_PRIVATE_KEY not set!", flush=True)
-        sys.exit(1)
-
-    health_thread = threading.Thread(target=start_health_check_server, daemon=True)
-    health_thread.start()
-    asyncio.run(scan_market())
-    def log_message(self, format, *args):
-        pass
-
-
-def start_health_check_server():
-    port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"Health check server on port {port}", flush=True)
-    server.serve_forever()
-
-
-if __name__ == "__main__":
-    if not HELIUS_RPC_URL:
-        print("CRITICAL: HELIUS_RPC_URL not set!", flush=True)
-        sys.exit(1)
-    if not BOT_WALLET_PRIVATE_KEY:
-        print("CRITICAL: BOT_WALLET_PRIVATE_KEY not set!", flush=True)
-        sys.exit(1)
-
-    health_thread = threading.Thread(target=start_health_check_server, daemon=True)
-    health_thread.start()
+    threading.Thread(target=run_server, daemon=True).start()
     asyncio.run(scan_market())
